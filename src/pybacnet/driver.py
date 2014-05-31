@@ -29,7 +29,7 @@ import sys
 from twisted.internet import threads, defer
 
 from smap.driver import SmapDriver
-from smap.util import periodicSequentialCall
+from smap.util import periodicSequentialCall, find
 from pybacnet import bacnet
 
 def _get_class(name):
@@ -53,11 +53,31 @@ class BACnetDriver(SmapDriver):
         self.points = map(re.compile, opts.get('points', ['.*']))
         self.ffilter = _get_class(opts.get('filter')) if opts.get('filter') else None
         self.pathnamer = _get_class(opts.get('pathnamer')) if opts.get('pathnamer') else None
+        self.actuators = _get_class(opts.get('actuators')) if opts.get('actuators') else None
+        act_names = a['name'] for a in self.actuators
         for (dev, obj, path) in self._iter_points():
             unit = str(obj['unit']).strip()
             if unit.isdigit():
                 unit = str(bacnet.type_str(int(unit)))
             self.add_timeseries(path, unit, data_type='double')
+
+            # Add actuators
+            if obj['name'] in act_names:
+                actuator = find(lambda a: a['name'] == obj['name'], self.actuators)
+                setup = {'obj': obj, 'device': dev}
+                if obj['type'] == 'Analog Output':
+                    setup['range'] = actuator['range']
+                    act = ContinuousActuator(**setup)
+                    data_type = 'double'
+                elif obj['type'] == 'Binary Output':
+                    setup['states'] = actuator['states']
+                    act = BinaryActuator(**setup)
+                    data_type = 'long'
+                elif obj['type'] == 'Multi-Stage Output':
+                    setup['states'] = actuator['states']
+                    act = DiscreteActuator(**setup)
+                    data_type = 'long'
+                self.add_actuator(path + "_act", act, data_type=data_type, write_limit=5)
 
     @staticmethod
     def _matches(s, pats):
@@ -70,13 +90,13 @@ class BACnetDriver(SmapDriver):
             path = str('/' + dev['name'] + '/' + obj['name'])
         return (dev, obj, path)
 
-    def _iter_points(self):            
+    def _iter_points(self):
         for dev in self.db:
             if self.ffilter:
                 for obj in dev['objs']:
                     if self.ffilter(dev['name'], obj['name']):
                         yield self.get_path(dev, obj)
-            else: 
+            else:
                 if not self._matches(dev['name'], self.devices): continue
                 for obj in dev['objs'][1:]:
                     if not self._matches(obj['name'], self.points): continue
@@ -100,3 +120,50 @@ class BACnetDriver(SmapDriver):
                 pass
             else:
                 self._add(path, float(val))
+
+class BACnetActuator(actuate.SmapActuator):
+    def __init__(self, **opts):
+        self.dev = opts['dev']
+        self.obj = opts['obj']
+        self.priority = 16 # todo: set priority through request arg
+        # todo: clear point with request arg
+
+    def get_state(self, request):
+        return bacnet.read_prop(self.dev['props'],
+                                self.obj['props']['type']
+                                self.obj['props']['instance'],
+                                bacnet.PROP_PRESENT_VALUE,
+                                -1)
+
+    def set_state(self, request, state):
+        bacnet.write_prop(self.dev['props'],
+                          self.obj['props']['type'],
+                          self.obj['props']['instance'],
+                          bacnet.PROP_PRESENT_VALUE,
+                          4,
+                          str(state),
+                          self.priority)
+
+    def clear(self, path)
+        return bacnet.write_prop(self.dev['props'],
+                                 self.obj['props']['type'],
+                                 self.obj['props']['instance'],
+                                 bacnet.PROP_PRESENT_VALUE,
+                                 bacnet.BACNET_APPLICATION_TAG_NULL,
+                                 "",
+                                 self.priority)
+
+class DiscreteActuator(BACnetActuator, actuate.NStateActuator):
+    def __init__(self, **opts):
+        actuate.NStateActuator.__init__(self, opts['states'])
+        BACnetActuator.__init__(self, **opts)
+
+class ContinuousActuator(BACnetActuator, actuate.ContinuousActuator):
+    def __init__(self, **opts):
+        actuate.ContinuousActuator.__init__(self, opts['range'])
+        BACnetActuator.__init__(self, **opts)
+
+class ContinuousIntegerActuator(BACnetActuator, actuate.ContinuousIntegerActuator):
+    def __init__(self, **opts):
+        actuate.ContinuousIntegerActuator.__init__(self, opts['range'])
+        BACnetActuator.__init__(self, **opts)
