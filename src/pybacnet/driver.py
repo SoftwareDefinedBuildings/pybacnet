@@ -30,6 +30,7 @@ from twisted.internet import threads, defer
 
 from smap.driver import SmapDriver
 from smap.util import periodicSequentialCall, find
+from smap import actuate
 from pybacnet import bacnet
 
 def _get_class(name):
@@ -54,7 +55,8 @@ class BACnetDriver(SmapDriver):
         self.ffilter = _get_class(opts.get('filter')) if opts.get('filter') else None
         self.pathnamer = _get_class(opts.get('pathnamer')) if opts.get('pathnamer') else None
         self.actuators = _get_class(opts.get('actuators')) if opts.get('actuators') else None
-        act_names = a['name'] for a in self.actuators
+        if self.actuators:
+            act_names = [a['name'] for a in self.actuators]
         for (dev, obj, path) in self._iter_points():
             unit = str(obj['unit']).strip()
             if unit.isdigit():
@@ -62,22 +64,24 @@ class BACnetDriver(SmapDriver):
             self.add_timeseries(path, unit, data_type='double')
 
             # Add actuators
-            if obj['name'] in act_names:
+            if self.actuators and obj['name'] in act_names:
                 actuator = find(lambda a: a['name'] == obj['name'], self.actuators)
-                setup = {'obj': obj, 'device': dev}
-                if obj['type'] == 'Analog Output':
+                setup = {'obj': obj, 'dev': dev}
+                if obj['props']['type_str'] == 'Analog Output':
                     setup['range'] = actuator['range']
                     act = ContinuousActuator(**setup)
                     data_type = 'double'
-                elif obj['type'] == 'Binary Output':
+                elif obj['props']['type_str'] == 'Binary Output':
                     setup['states'] = actuator['states']
                     act = BinaryActuator(**setup)
                     data_type = 'long'
-                elif obj['type'] == 'Multi-Stage Output':
+                elif obj['props']['type_str'] == 'Multi-State Output':
                     setup['states'] = actuator['states']
                     act = DiscreteActuator(**setup)
                     data_type = 'long'
-                self.add_actuator(path + "_act", act, data_type=data_type, write_limit=5)
+                if act:
+                    print "adding actuator:", path, unit, act
+                    self.add_actuator(path + "_act", unit, act, data_type=data_type, write_limit=5)
 
     @staticmethod
     def _matches(s, pats):
@@ -130,21 +134,22 @@ class BACnetActuator(actuate.SmapActuator):
 
     def get_state(self, request):
         return bacnet.read_prop(self.dev['props'],
-                                self.obj['props']['type']
+                                self.obj['props']['type'],
                                 self.obj['props']['instance'],
                                 bacnet.PROP_PRESENT_VALUE,
                                 -1)
 
     def set_state(self, request, state):
-        bacnet.write_prop(self.dev['props'],
+        val = bacnet.write_prop(self.dev['props'],
                           self.obj['props']['type'],
                           self.obj['props']['instance'],
                           bacnet.PROP_PRESENT_VALUE,
                           4,
                           str(state),
                           self.priority)
+        return val
 
-    def clear(self, path)
+    def clear(self, path):
         return bacnet.write_prop(self.dev['props'],
                                  self.obj['props']['type'],
                                  self.obj['props']['instance'],
