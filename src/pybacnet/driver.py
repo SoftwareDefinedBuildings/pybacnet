@@ -27,6 +27,7 @@ import operator
 import sys
 
 from twisted.internet import threads, defer
+from twisted.python import log
 
 from smap.driver import SmapDriver
 from smap.util import periodicSequentialCall, find
@@ -34,14 +35,14 @@ from smap import actuate
 from pybacnet import bacnet
 
 def _get_class(name):
-  cmps = name.split('.')
-  assert len(cmps) > 1
-  (mod_name, class_name) = ('.'.join(cmps[:-1]), cmps[-1])
-  if mod_name in sys.modules:
-      mod = sys.modules[mod_name]
-  else:
-      mod = __import__(mod_name, globals(), locals(), [class_name])
-  return getattr(mod, class_name)
+    cmps = name.split('.')
+    assert len(cmps) > 1
+    (mod_name, class_name) = ('.'.join(cmps[:-1]), cmps[-1])
+    if mod_name in sys.modules:
+        mod = sys.modules[mod_name]
+    else:
+        mod = __import__(mod_name, globals(), locals(), [class_name])
+    return getattr(mod, class_name)
 
 class BACnetDriver(SmapDriver):
     """Driver for polling BACnet points"""
@@ -129,8 +130,7 @@ class BACnetActuator(actuate.SmapActuator):
     def __init__(self, **opts):
         self.dev = opts['dev']
         self.obj = opts['obj']
-        self.priority = 16 # todo: set priority through request arg
-        # todo: clear point with request arg
+        self.priority = 16
 
     def get_state(self, request):
         return bacnet.read_prop(self.dev['props'],
@@ -140,16 +140,22 @@ class BACnetActuator(actuate.SmapActuator):
                                 -1)
 
     def set_state(self, request, state):
-        val = bacnet.write_prop(self.dev['props'],
-                          self.obj['props']['type'],
-                          self.obj['props']['instance'],
-                          bacnet.PROP_PRESENT_VALUE,
-                          4,
-                          str(state),
-                          self.priority)
-        return val
+        if 'priority' in request.args:
+            self.priority = int(request.args['priority'][0])
 
-    def clear(self, path):
+        if 'clear' in request.args:
+            self.clear()
+        else:
+            bacnet.write_prop(self.dev['props'],
+                              self.obj['props']['type'],
+                              self.obj['props']['instance'],
+                              bacnet.PROP_PRESENT_VALUE,
+                              4,
+                              str(state),
+                              self.priority)
+        return self.get_state(None)
+
+    def clear(self):
         return bacnet.write_prop(self.dev['props'],
                                  self.obj['props']['type'],
                                  self.obj['props']['instance'],
