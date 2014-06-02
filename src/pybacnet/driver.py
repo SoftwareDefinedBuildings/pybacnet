@@ -27,7 +27,6 @@ import operator
 import sys
 
 from twisted.internet import threads, defer
-from twisted.python import log
 
 from smap.driver import SmapDriver
 from smap.util import periodicSequentialCall, find
@@ -150,7 +149,7 @@ class BACnetActuator(actuate.SmapActuator):
                               self.obj['props']['type'],
                               self.obj['props']['instance'],
                               bacnet.PROP_PRESENT_VALUE,
-                              4,
+                              bacnet.BACNET_APPLICATION_TAG_REAL,
                               str(state),
                               self.priority)
         return self.get_state(None)
