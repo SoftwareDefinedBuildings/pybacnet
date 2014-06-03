@@ -19,6 +19,7 @@ Copyright (c) 2013 Building Robotics, Inc.
 """
 """
 @author Stephen Dawson-Haggerty <steve@buildingrobotics.com>
+@author Tyler Hoyt <thoyt@berkeley.edu>
 """
 
 import json
@@ -69,13 +70,15 @@ class BACnetDriver(SmapDriver):
                 setup = {'obj': obj, 'dev': dev}
                 if obj['props']['type_str'] == 'Analog Output':
                     setup['range'] = actuator['range']
+                    setup['application_tag'] = bacnet.BACNET_APPLICATION_TAG_REAL
                     act = ContinuousActuator(**setup)
                     data_type = 'double'
                 elif obj['props']['type_str'] == 'Binary Output':
-                    setup['states'] = actuator['states']
+                    setup['application_tag'] = bacnet.BACNET_APPLICATION_TAG_ENUMERATED
                     act = BinaryActuator(**setup)
                     data_type = 'long'
                 elif obj['props']['type_str'] == 'Multi-State Output':
+                    setup['application_tag'] = bacnet.BACNET_APPLICATION_TAG_ENUMERATED
                     setup['states'] = actuator['states']
                     act = DiscreteActuator(**setup)
                     data_type = 'long'
@@ -130,6 +133,7 @@ class BACnetActuator(actuate.SmapActuator):
         self.dev = opts['dev']
         self.obj = opts['obj']
         self.priority = 16
+        self.application_tag = opts['application_tag']
 
     def get_state(self, request):
         return bacnet.read_prop(self.dev['props'],
@@ -149,7 +153,7 @@ class BACnetActuator(actuate.SmapActuator):
                               self.obj['props']['type'],
                               self.obj['props']['instance'],
                               bacnet.PROP_PRESENT_VALUE,
-                              bacnet.BACNET_APPLICATION_TAG_REAL,
+                              self.application_tag,
                               str(state),
                               self.priority)
         return self.get_state(None)
@@ -163,17 +167,17 @@ class BACnetActuator(actuate.SmapActuator):
                                  "",
                                  self.priority)
 
-class DiscreteActuator(BACnetActuator, actuate.NStateActuator):
-    def __init__(self, **opts):
-        actuate.NStateActuator.__init__(self, opts['states'])
-        BACnetActuator.__init__(self, **opts)
-
 class ContinuousActuator(BACnetActuator, actuate.ContinuousActuator):
     def __init__(self, **opts):
         actuate.ContinuousActuator.__init__(self, opts['range'])
         BACnetActuator.__init__(self, **opts)
 
-class ContinuousIntegerActuator(BACnetActuator, actuate.ContinuousIntegerActuator):
+class BinaryActuator(BACnetActuator, actuate.BinaryActuator):
     def __init__(self, **opts):
-        actuate.ContinuousIntegerActuator.__init__(self, opts['range'])
+        actuate.BinaryActuator.__init__(self)
+        BACnetActuator.__init__(self, **opts)
+
+class DiscreteActuator(BACnetActuator, actuate.NStateActuator):
+    def __init__(self, **opts):
+        actuate.NStateActuator.__init__(self, opts['states'])
         BACnetActuator.__init__(self, **opts)
