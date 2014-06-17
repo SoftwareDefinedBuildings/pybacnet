@@ -56,6 +56,7 @@ class BACnetDriver(SmapDriver):
         self.ffilter = _get_class(opts.get('filter')) if opts.get('filter') else None
         self.pathnamer = _get_class(opts.get('pathnamer')) if opts.get('pathnamer') else None
         self.actuators = _get_class(opts.get('actuators')) if opts.get('actuators') else None
+
         if self.actuators:
             act_names = [a['name'] for a in self.actuators]
         for (dev, obj, path) in self._iter_points():
@@ -68,16 +69,22 @@ class BACnetDriver(SmapDriver):
             if self.actuators and obj['name'] in act_names:
                 actuator = find(lambda a: a['name'] == obj['name'], self.actuators)
                 setup = {'obj': obj, 'dev': dev}
-                if obj['props']['type_str'] == 'Analog Output':
+                if obj['props']['type'] in [bacnet.OBJECT_ANALOG_INPUT, 
+                                            bacnet.OBJECT_ANALOG_OUTPUT, 
+                                            bacnet.OBJECT_ANALOG_VALUE]:
                     setup['range'] = actuator['range']
                     setup['application_tag'] = bacnet.BACNET_APPLICATION_TAG_REAL
                     act = ContinuousActuator(**setup)
                     data_type = 'double'
-                elif obj['props']['type_str'] == 'Binary Output':
+                elif obj['props']['type'] in [bacnet.OBJECT_BINARY_INPUT,
+                                              bacnet.OBJECT_BINARY_OUTPUT,
+                                              bacnet.OBJECT_BINARY_VALUE]:
                     setup['application_tag'] = bacnet.BACNET_APPLICATION_TAG_ENUMERATED
                     act = BinaryActuator(**setup)
                     data_type = 'long'
-                elif obj['props']['type_str'] == 'Multi-State Output':
+                elif obj['props']['type'] in [bacnet.OBJECT_MULTI_STATE_INPUT,
+                                              bacnet.OBJECT_MULTI_STATE_OUTPUT,
+                                              bacnet.OBJECT_MULTI_STATE_VALUE]:
                     setup['application_tag'] = bacnet.BACNET_APPLICATION_TAG_ENUMERATED
                     setup['states'] = actuator['states']
                     act = DiscreteActuator(**setup)
